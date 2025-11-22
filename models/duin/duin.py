@@ -1693,8 +1693,11 @@ class duin_multitask(nn.Module):
         if 'visual' in targets_dict:
             Y_visual = targets_dict['visual']
 
+            # Apply task-specific mapping with residual connection if enabled
+            E_visual = self.visual_mapping(E) + E if hasattr(self, 'visual_mapping') else E
+
             # Forward visual alignment head
-            Z_visual = self.visual_head(E)  # (batch_size, 768)
+            Z_visual = self.visual_head(E_visual)  # (batch_size, 768)
 
             # L2 normalization
             Z_visual_norm = F.normalize(Z_visual, p=2, dim=-1)
@@ -1724,8 +1727,11 @@ class duin_multitask(nn.Module):
         if 'acoustic' in targets_dict:
             t_true = targets_dict['acoustic']  # (2[list], batch_size, n_tones)
 
+            # Apply task-specific mapping with residual connection if enabled
+            E_acoustic = self.acoustic_mapping(E) + E if hasattr(self, 'acoustic_mapping') else E
+
             # Forward acoustic classification heads
-            t_pred = [self.acoustic_heads[tone_idx](E) for tone_idx in range(len(self.acoustic_heads))]
+            t_pred = [self.acoustic_heads[tone_idx](E_acoustic) for tone_idx in range(len(self.acoustic_heads))]
             # t_pred - (2[list], batch_size, token_len, n_tones)
 
             # Expand t_true to match per-token supervision
@@ -2253,6 +2259,22 @@ class duin_joint_multitask_cls(nn.Module):
             TokenCLSHead(params=cls_tone2_params),
         ])
 
+        # ===== Task-specific mapping matrices with residual connection =====
+        if self.params.get('use_task_mapping', False):
+            self.semantic_mapping = nn.Linear(
+                self.params.encoder.d_model,
+                self.params.encoder.d_model
+            )
+            self.visual_mapping = nn.Linear(
+                self.params.encoder.d_model,
+                self.params.encoder.d_model
+            )
+            self.acoustic_mapping = nn.Linear(
+                self.params.encoder.d_model,
+                self.params.encoder.d_model
+            )
+            print(f"INFO: Task-specific mapping matrices enabled (d_model={self.params.encoder.d_model})")
+
         # ===== Calculate fusion dimension dynamically =====
         # d_fusion = 768 (semantic) + 768 (visual) + d_acoustic
         acoustic_d_hidden = self.params.acoustic_cls.d_hidden
@@ -2315,6 +2337,17 @@ class duin_joint_multitask_cls(nn.Module):
             if isinstance(module_i, nn.Linear):
                 nn.init.trunc_normal_(module_i.weight, mean=0., std=0.02)
                 if module_i.bias is not None: nn.init.constant_(module_i.bias, val=0.)
+
+        # Initialize task-specific mapping matrices if enabled
+        if hasattr(self, 'semantic_mapping'):
+            nn.init.xavier_uniform_(self.semantic_mapping.weight)
+            nn.init.zeros_(self.semantic_mapping.bias)
+        if hasattr(self, 'visual_mapping'):
+            nn.init.xavier_uniform_(self.visual_mapping.weight)
+            nn.init.zeros_(self.visual_mapping.bias)
+        if hasattr(self, 'acoustic_mapping'):
+            nn.init.xavier_uniform_(self.acoustic_mapping.weight)
+            nn.init.zeros_(self.acoustic_mapping.bias)
 
     """
     load funcs
@@ -2410,8 +2443,11 @@ class duin_joint_multitask_cls(nn.Module):
         if 'semantic' in targets_dict:
             Y_semantic = targets_dict['semantic']
 
+            # Apply task-specific mapping with residual connection if enabled
+            E_semantic = self.semantic_mapping(E) + E if hasattr(self, 'semantic_mapping') else E
+
             # Forward semantic alignment head
-            Z_semantic = self.semantic_head(E)  # (batch_size, 768)
+            Z_semantic = self.semantic_head(E_semantic)  # (batch_size, 768)
 
             # L2 normalization
             Z_semantic_norm = F.normalize(Z_semantic, p=2, dim=-1)
@@ -2440,8 +2476,11 @@ class duin_joint_multitask_cls(nn.Module):
         if 'visual' in targets_dict:
             Y_visual = targets_dict['visual']
 
+            # Apply task-specific mapping with residual connection if enabled
+            E_visual = self.visual_mapping(E) + E if hasattr(self, 'visual_mapping') else E
+
             # Forward visual alignment head
-            Z_visual = self.visual_head(E)  # (batch_size, 768)
+            Z_visual = self.visual_head(E_visual)  # (batch_size, 768)
 
             # L2 normalization
             Z_visual_norm = F.normalize(Z_visual, p=2, dim=-1)
@@ -2471,8 +2510,11 @@ class duin_joint_multitask_cls(nn.Module):
         if 'acoustic' in targets_dict:
             t_true = targets_dict['acoustic']  # (2[list], batch_size, n_tones)
 
+            # Apply task-specific mapping with residual connection if enabled
+            E_acoustic = self.acoustic_mapping(E) + E if hasattr(self, 'acoustic_mapping') else E
+
             # Forward acoustic classification heads
-            t_pred = [self.acoustic_heads[tone_idx](E) for tone_idx in range(len(self.acoustic_heads))]
+            t_pred = [self.acoustic_heads[tone_idx](E_acoustic) for tone_idx in range(len(self.acoustic_heads))]
             # t_pred - (2[list], batch_size, token_len, n_tones)
 
             # Expand t_true to match per-token supervision
@@ -2512,19 +2554,24 @@ class duin_joint_multitask_cls(nn.Module):
             y_true = targets_dict['y_true']
 
             # Extract fused embeddings (same as duin_fusion_cls)
+            # Apply task-specific mapping with residual connection if enabled
+            E_semantic = self.semantic_mapping(E) + E if hasattr(self, 'semantic_mapping') else E
+            E_visual = self.visual_mapping(E) + E if hasattr(self, 'visual_mapping') else E
+            E_acoustic = self.acoustic_mapping(E) + E if hasattr(self, 'acoustic_mapping') else E
+
             # Semantic - (batch_size, 768)
-            semantic_emb = self.semantic_head(E)
+            semantic_emb = self.semantic_head(E_semantic)
             semantic_emb = F.normalize(semantic_emb, p=2, dim=-1)
 
             # Visual - (batch_size, 768)
-            visual_emb = self.visual_head(E)
+            visual_emb = self.visual_head(E_visual)
             visual_emb = F.normalize(visual_emb, p=2, dim=-1)
 
             # Acoustic - Extract features before final classification
             # acoustic_emb - (batch_size, d_hidden[-1])
             acoustic_features_list = []
             for acoustic_head in self.acoustic_heads:
-                features, _ = acoustic_head(E, return_features=True)
+                features, _ = acoustic_head(E_acoustic, return_features=True)
                 acoustic_features_list.append(features)
             # Average features from both tone heads
             acoustic_emb = torch.mean(torch.stack(acoustic_features_list, dim=0), dim=0)

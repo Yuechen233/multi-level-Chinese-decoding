@@ -1820,6 +1820,9 @@ class duin_joint_multitask_cls_params(duin_params):
         self._update_model_visual_align_params()
         self._update_model_acoustic_cls_params()
 
+        # Task-specific mapping matrices with residual connection (default: disabled)
+        self.model.use_task_mapping = False
+
         ## -- Fusion head parameters (NEW, same as duin_fusion_cls_params)
         self._update_model_fusion_params()
 

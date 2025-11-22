@@ -1005,38 +1005,45 @@ def train():
             log_var_semantic = model_to_log.log_var_semantic.item()
             log_var_visual = model_to_log.log_var_visual.item()
             log_var_acoustic = model_to_log.log_var_acoustic.item()
+            log_var_e2e = model_to_log.log_var_e2e.item()
 
             # Calculate actual task weights (precision = exp(-log_var))
             weight_semantic = np.exp(-log_var_semantic)
             weight_visual = np.exp(-log_var_visual)
             weight_acoustic = np.exp(-log_var_acoustic)
+            weight_e2e = np.exp(-log_var_e2e)
 
             # Log log-variance (uncertainty)
             writer.add_scalar("task_weights/log_var_semantic", log_var_semantic, global_step=epoch_idx)
             writer.add_scalar("task_weights/log_var_visual", log_var_visual, global_step=epoch_idx)
             writer.add_scalar("task_weights/log_var_acoustic", log_var_acoustic, global_step=epoch_idx)
+            writer.add_scalar("task_weights/log_var_e2e", log_var_e2e, global_step=epoch_idx)
 
             # Log derived task weights (precision)
             writer.add_scalar("task_weights/weight_semantic", weight_semantic, global_step=epoch_idx)
             writer.add_scalar("task_weights/weight_visual", weight_visual, global_step=epoch_idx)
             writer.add_scalar("task_weights/weight_acoustic", weight_acoustic, global_step=epoch_idx)
+            writer.add_scalar("task_weights/weight_e2e", weight_e2e, global_step=epoch_idx)
 
             # Log normalized weights (for easier interpretation)
-            total_weight = weight_semantic + weight_visual + weight_acoustic
+            total_weight = weight_semantic + weight_visual + weight_acoustic + weight_e2e
             writer.add_scalar("task_weights/normalized_semantic", weight_semantic / total_weight, global_step=epoch_idx)
             writer.add_scalar("task_weights/normalized_visual", weight_visual / total_weight, global_step=epoch_idx)
             writer.add_scalar("task_weights/normalized_acoustic", weight_acoustic / total_weight, global_step=epoch_idx)
+            writer.add_scalar("task_weights/normalized_e2e", weight_e2e / total_weight, global_step=epoch_idx)
         else:
             # Log fixed task weights from params
             writer.add_scalar("task_weights/weight_semantic", params.model.task_weight_semantic, global_step=epoch_idx)
             writer.add_scalar("task_weights/weight_visual", params.model.task_weight_visual, global_step=epoch_idx)
             writer.add_scalar("task_weights/weight_acoustic", params.model.task_weight_acoustic, global_step=epoch_idx)
+            writer.add_scalar("task_weights/weight_e2e", params.model.task_weight_e2e, global_step=epoch_idx)
 
             # Log normalized weights
-            total_weight = params.model.task_weight_semantic + params.model.task_weight_visual + params.model.task_weight_acoustic
+            total_weight = params.model.task_weight_semantic + params.model.task_weight_visual + params.model.task_weight_acoustic + params.model.task_weight_e2e
             writer.add_scalar("task_weights/normalized_semantic", params.model.task_weight_semantic / total_weight, global_step=epoch_idx)
             writer.add_scalar("task_weights/normalized_visual", params.model.task_weight_visual / total_weight, global_step=epoch_idx)
             writer.add_scalar("task_weights/normalized_acoustic", params.model.task_weight_acoustic / total_weight, global_step=epoch_idx)
+            writer.add_scalar("task_weights/normalized_e2e", params.model.task_weight_e2e / total_weight, global_step=epoch_idx)
 
         # === Track and save best model ===
         current_val_total_loss = loss_validation.get("total", float('inf'))
@@ -1195,6 +1202,11 @@ def get_args_parser():
     parser.add_argument("--visual_dropout", type=float, default=0.1)
     parser.add_argument("--acoustic_d_hidden", type=str, default="128")
     parser.add_argument("--acoustic_dropout", type=float, default=0.5)
+
+    # Task-specific mapping matrices flag
+    parser.add_argument("--use_task_mapping", action="store_true",
+        help="Enable task-specific mapping matrices with residual connection between encoder and task heads.")
+
     # Fusion head parameters (NEW)
     parser.add_argument("--fusion_d_hidden", type=str, default="512,256")
     parser.add_argument("--fusion_dropout", type=float, default=0.3)
@@ -1254,6 +1266,10 @@ if __name__ == "__main__":
             params_i.model.task_weight_e2e = args.task_weight_e2e  # NEW
             params_i.model.use_uncertainty_weighting = args.use_uncertainty_weighting
             params_i.model.acoustic_use_contra = args.acoustic_use_contra
+
+            # Task-specific mapping matrices flag
+            params_i.model.use_task_mapping = args.use_task_mapping
+
             # Loss scales
             params_i.model.semantic_align_loss_scale = args.semantic_align_loss_scale
             params_i.model.semantic_contra_loss_scale = args.semantic_contra_loss_scale

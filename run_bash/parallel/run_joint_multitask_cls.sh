@@ -21,7 +21,7 @@ ALL_SUBJS=("001")
 
 # Learning rate schedule
 LR_MIN=1e-5                   # Minimum learning rate (cosine annealing end)
-LR_MAX=5e-4                   # Maximum learning rate (after warmup)
+LR_MAX=2e-4                   # Maximum learning rate (after warmup)
 
 # Training schedule
 N_EPOCHS=300                  # Total number of training epochs
@@ -36,11 +36,15 @@ BATCH_SIZE=32                 # Batch size for training
 TASK_WEIGHT_SEMANTIC=1.0      # Weight for semantic alignment task
 TASK_WEIGHT_VISUAL=1.0        # Weight for visual alignment task
 TASK_WEIGHT_ACOUSTIC=1.0      # Weight for acoustic classification task
-TASK_WEIGHT_E2E=3.0           # Weight for end-to-end word classification task (NEW)
+TASK_WEIGHT_E2E=1.0           # Weight for end-to-end word classification task (NEW)
 
 # Multi-task learning strategy flags
-USE_UNCERTAINTY_WEIGHTING=""  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
+# USE_UNCERTAINTY_WEIGHTING=""  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
+USE_UNCERTAINTY_WEIGHTING="--use_uncertainty_weighting"  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
 ACOUSTIC_USE_CONTRA=""        # Set to "--acoustic_use_contra" to add contrastive loss to acoustic task, default as ""
+
+# Task-specific mapping matrices flag (NEW)
+USE_TASK_MAPPING="--use_task_mapping"            # Set to "--use_task_mapping" to enable task-specific mapping with residual, default as ""
 
 ################################################################################
 # Loss Scales for Each Task
@@ -150,6 +154,7 @@ for SUBJ in "${ALL_SUBJS[@]}"; do
         --contra_loss_mode ${CONTRA_LOSS_MODE} \
         --n_blocks ${N_BLOCKS} \
         --n_heads ${N_HEADS} \
+        ${USE_TASK_MAPPING} \
         --run_script "${SCRIPT_PATH}"
 
     echo "Finished training subject ${SUBJ}"
@@ -177,6 +182,12 @@ echo "========================================="
 ################################################################################
 # Uncomment below to add contrastive loss to acoustic task:
 # ACOUSTIC_USE_CONTRA="--acoustic_use_contra"
+
+################################################################################
+# Example: Enable task-specific mapping matrices
+################################################################################
+# Uncomment below to enable trainable mapping matrices with residual connections:
+# USE_TASK_MAPPING="--use_task_mapping"
 
 ################################################################################
 # Example: Experiment with different task weights
