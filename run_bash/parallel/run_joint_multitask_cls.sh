@@ -17,7 +17,7 @@ SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SO
 SEEDS="42"                    # Random seeds (space-separated for multiple runs)
 # Subject list - will loop through all subjects sequentially
 # ALL_SUBJS=("001" "002" "003" "004" "005" "006" "007" "008" "009" "010" "011" "012")
-ALL_SUBJS=("004")
+ALL_SUBJS=("001")
 
 # Learning rate schedule
 LR_MIN=1e-5                   # Minimum learning rate (cosine annealing end)
@@ -66,11 +66,11 @@ CLS_LOSS_SCALE=1.0                 # E2E word classification loss scale
 ################################################################################
 
 # Semantic alignment head architecture
-SEMANTIC_D_HIDDEN="2048,1024,768"  # Hidden layer dimensions (comma-separated)
+SEMANTIC_D_HIDDEN="1024,768"  # Hidden layer dimensions (comma-separated)
 SEMANTIC_DROPOUT=0.1               # Dropout rate for semantic head
 
 # Visual alignment head architecture
-VISUAL_D_HIDDEN="2048,1024,768"    # Hidden layer dimensions (comma-separated)
+VISUAL_D_HIDDEN="1024,768"    # Hidden layer dimensions (comma-separated)
 VISUAL_DROPOUT=0.1                 # Dropout rate for visual head
 
 # Acoustic classification head architecture

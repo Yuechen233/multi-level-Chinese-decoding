@@ -664,8 +664,8 @@ def _evaluate(model, dataloader, params, device):
 
             batch_size_i = X.shape[0]
 
-            # Aggregate losses (include e2e classification loss)
-            for key_i in ['total', 'semantic', 'visual', 'acoustic', 'e2e', 'cls']:  # ← Add e2e and cls
+            # Aggregate losses (include e2e classification loss, but not cls)
+            for key_i in ['total', 'semantic', 'visual', 'acoustic', 'e2e']:  # ← Only record e2e, not cls
                 if hasattr(loss, key_i):
                     loss_val = getattr(loss, key_i).item()
                     if hasattr(loss_dict, key_i):
@@ -925,9 +925,9 @@ def train():
             loss.total.backward()
             optimizer.step()
 
-            # Aggregate losses
+            # Aggregate losses (only record e2e, not cls)
             batch_size_i = X.shape[0]
-            for key_i in ['total', 'semantic', 'visual', 'acoustic']:
+            for key_i in ['total', 'semantic', 'visual', 'acoustic', 'e2e']:
                 if hasattr(loss, key_i):
                     loss_val = getattr(loss, key_i).item()
                     if hasattr(loss_train, key_i):
@@ -988,6 +988,12 @@ def train():
         writer.add_scalar("accuracy/validation/tone2", val_acoustic_results['tone2_acc'], global_step=epoch_idx)
         writer.add_scalar("accuracy/test/tone1", test_acoustic_results['tone1_acc'], global_step=epoch_idx)
         writer.add_scalar("accuracy/test/tone2", test_acoustic_results['tone2_acc'], global_step=epoch_idx)
+
+        # Log e2e classification accuracy (NEW)
+        if 'e2e_acc' in val_e2e_results:
+            writer.add_scalar("accuracy/validation/e2e_cls", val_e2e_results['e2e_acc'], global_step=epoch_idx)
+        if 'e2e_acc' in test_e2e_results:
+            writer.add_scalar("accuracy/test/e2e_cls", test_e2e_results['e2e_acc'], global_step=epoch_idx)
 
         # Log learning rate
         writer.add_scalar("learning_rate", params.train.lr_i, global_step=epoch_idx)
