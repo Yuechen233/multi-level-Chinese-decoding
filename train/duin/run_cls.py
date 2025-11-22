@@ -75,6 +75,8 @@ def _init_model():
     torch.set_default_dtype(getattr(torch, params._precision))
     # Set the internal precision of float32 matrix multiplications.
     torch.set_float32_matmul_precision("high")
+    # Disable cuDNN for reproducibility and deterministic behavior
+    torch.backends.cudnn.enabled = False
 
 # def _init_train func
 def _init_train():
@@ -414,8 +416,8 @@ def train():
     paths.run.logger.summaries.info("Training started with dataset {}.".format(params.train.dataset))
     # Initialize model device.
     #这里强制指定为CPU尝试一下！！！！！！！！！
-    # params.model.device = torch.device("cuda:{:d}".format(0)) if torch.cuda.is_available() else torch.device("cpu")
-    params.model.device = torch.device("cpu")
+    params.model.device = torch.device("cuda:{:d}".format(0)) if torch.cuda.is_available() else torch.device("cpu")
+    # params.model.device = torch.device("cpu")
     print(params.model.device); paths.run.logger.summaries.info(params.model.device)
     # Initialize load_params. Each load_params_i corresponds to a sub-dataset.
     if params.train.dataset == "seeg_he2023xuanwu":

@@ -1732,6 +1732,233 @@ class duin_fusion_cls_params(duin_params):
             # The learning rate factors of training process
             self.train.lr_factors = (1e-5, 1e-4)
 
+# def duin_joint_multitask_cls_params class
+class duin_joint_multitask_cls_params(duin_params):
+    """
+    This contains one single object that generates a dictionary of parameters,
+    which is provided to `duin_joint_multitask_cls` on initialization.
+    Combines multi-task learning (semantic/visual/acoustic) with end-to-end 61-word classification.
+    """
+
+    def __init__(self, dataset="seeg_he2023xuanwu"):
+        """
+        Initialize `duin_joint_multitask_cls_params` object.
+        """
+        ## First call super class init function to set up `DotDict`
+        ## style object and inherit it's functionality.
+        super(duin_joint_multitask_cls_params, self).__init__(dataset=dataset)
+
+        ## Update all parameters hierarchically.
+        # -- Model parameters
+        self._update_model_params()
+        # -- Train parameters
+        self._update_train_params()
+
+        ## Do init iteration.
+        duin_joint_multitask_cls_params.iteration(self, 0)
+
+    """
+    update funcs
+    """
+    # def iteration func
+    def iteration(self, iteration):
+        """
+        Update parameters at every backpropagation iteration/gradient update.
+        """
+        ## Iterate super parameters.
+        super(duin_joint_multitask_cls_params, self).iteration(iteration)
+        ## -- Train parameters
+        # Calculate current learning rate.
+        lr_min, lr_max = self.train.lr_factors
+        # If `iteration` is smaller than `params.train.warmup_epochs`, gradually increase `lr`.
+        if iteration < self.train.warmup_epochs:
+            self.train.lr_i = lr_max * ((iteration + 1) / self.train.warmup_epochs)
+        # After `config.warmup_epochs`, decay the learning rate with half-cycle cosine after warmup.
+        else:
+            self.train.lr_i = lr_min + (lr_max - lr_min) * 0.5 *\
+                (1. + np.cos(np.pi * (iteration - self.train.warmup_epochs) / (self.train.n_epochs - self.train.warmup_epochs)))
+
+    ## def _update_model_* funcs
+    # def _update_model_params func
+    def _update_model_params(self):
+        """
+        Update model parameters.
+        """
+        ## -- Multi-task learning parameters (same as duin_multitask_params)
+        # Task weights for combining losses (used when use_uncertainty_weighting=False)
+        self.model.task_weight_semantic = 1.0
+        self.model.task_weight_visual = 1.0
+        self.model.task_weight_acoustic = 1.0
+        self.model.task_weight_e2e = 2.0  # NEW: weight for e2e classification loss
+
+        # Whether to use uncertainty-based automatic task weighting (Kendall et al., 2018)
+        self.model.use_uncertainty_weighting = False
+
+        # Whether to use contrastive loss for acoustic task
+        self.model.acoustic_use_contra = False
+
+        ## -- Loss scale factors for each task (same as duin_multitask_params)
+        # Semantic alignment loss scales
+        self.model.semantic_align_loss_scale = 5.0
+        self.model.semantic_contra_loss_scale = 0.5
+
+        # Visual alignment loss scales
+        self.model.visual_align_loss_scale = 5.0
+        self.model.visual_contra_loss_scale = 0.5
+
+        # Acoustic classification loss scales
+        self.model.acoustic_cls_loss_scale = 1.0
+        self.model.acoustic_contra_loss_scale = 0.5  # Only used if acoustic_use_contra=True
+
+        # E2E classification loss scale (NEW)
+        self.model.cls_loss_scale = 1.0
+
+        ## -- Task-specific parameters (same as duin_multitask_params)
+        # Update parameters for each task
+        self._update_model_contra_params()
+        self._update_model_semantic_align_params()
+        self._update_model_visual_align_params()
+        self._update_model_acoustic_cls_params()
+
+        ## -- Fusion head parameters (NEW, same as duin_fusion_cls_params)
+        self._update_model_fusion_params()
+
+    # def _update_model_contra_params func
+    def _update_model_contra_params(self):
+        """
+        Update model.contra parameters (shared by alignment tasks).
+        """
+        # Initialize `model_contra_params`.
+        self.model.contra = DotDict()
+        ## -- Normal parameters
+        # The dimensions of model embedding.
+        self.model.contra.d_model = self.model.encoder.d_model
+        # The dimension of contrastive projection.
+        self.model.contra.d_contra = 32
+        # The mode of contrastive loss calculation.
+        self.model.contra.loss_mode = ["clip", "clip_orig", "unicl"][1]
+
+    # def _update_model_semantic_align_params func
+    def _update_model_semantic_align_params(self):
+        """
+        Update model.semantic_align parameters for semantic alignment head.
+        """
+        self.model.semantic_align = DotDict()
+        ## -- Normal parameters
+        # The dimensions of feature embedding after flattening (emb_len * d_model).
+        self.model.semantic_align.d_feature = self.model.encoder.emb_len * self.model.encoder.d_model
+        # Output dimension (BERT embedding dimension)
+        self.model.semantic_align.d_output = 768
+        # Hidden layer dimensions (configurable via command-line)
+        self.model.semantic_align.d_hidden = [2048, 1024, 768]
+        # Dropout rate
+        self.model.semantic_align.dropout = 0.1
+
+    # def _update_model_visual_align_params func
+    def _update_model_visual_align_params(self):
+        """
+        Update model.visual_align parameters for visual alignment head.
+        """
+        self.model.visual_align = DotDict()
+        ## -- Normal parameters
+        # The dimensions of feature embedding after flattening (emb_len * d_model).
+        self.model.visual_align.d_feature = self.model.encoder.emb_len * self.model.encoder.d_model
+        # Output dimension (ViT embedding dimension)
+        self.model.visual_align.d_output = 768
+        # Hidden layer dimensions (configurable via command-line)
+        self.model.visual_align.d_hidden = [2048, 1024, 768]
+        # Dropout rate
+        self.model.visual_align.dropout = 0.1
+
+    # def _update_model_acoustic_cls_params func
+    def _update_model_acoustic_cls_params(self):
+        """
+        Update model.acoustic_cls parameters for acoustic classification heads.
+        """
+        # Initialize `model_acoustic_cls_params`.
+        self.model.acoustic_cls = DotDict()
+        ## -- Normal parameters
+        # The dimensions of model embedding.
+        self.model.acoustic_cls.d_model = self.model.encoder.d_model
+        # Normal parameters related to seeg_he2023xuanwu dataset.
+        if self.model.dataset == "seeg_he2023xuanwu":
+            # The dimensions of the hidden layers (configurable via command-line)
+            self.model.acoustic_cls.d_hidden = [128,]
+            # The dropout probability after the hidden layers
+            self.model.acoustic_cls.dropout = 0.5
+        # Normal parameters related to eeg_zhou2023cibr dataset.
+        elif self.model.dataset == "eeg_zhou2023cibr":
+            # The dimensions of the hidden layers
+            self.model.acoustic_cls.d_hidden = [128,]
+            # The dropout probability after the hidden layers
+            self.model.acoustic_cls.dropout = 0.5
+        # Normal parameters related to other dataset.
+        else:
+            # The dimensions of the hidden layers
+            self.model.acoustic_cls.d_hidden = [128,]
+            # The dropout probability after the hidden layers
+            self.model.acoustic_cls.dropout = 0.5
+        # The number of tone classes (5 tones in Mandarin: tone1, tone2, tone3, tone4, neutral)
+        self.model.acoustic_cls.n_tone1 = 5
+        self.model.acoustic_cls.n_tone2 = 5
+        # Whether to apply L2 normalization to logits before computing loss
+        self.model.acoustic_cls.use_l2_norm = True
+
+    # def _update_model_fusion_params func
+    def _update_model_fusion_params(self):
+        """
+        Update model.fusion parameters for fusion classification head.
+        """
+        self.model.fusion = DotDict()
+        ## -- Normal parameters
+        # The dimensions of the hidden layers (configurable via command-line)
+        # Default: [512, 256] → 61
+        self.model.fusion.d_hidden = [512, 256]
+        # The dropout probability after the hidden layers
+        self.model.fusion.dropout = 0.3
+        # The number of output labels (61 Chinese words)
+        self.model.fusion.n_labels = 61
+
+    ## def _update_train_* funcs
+    # def _update_train_params func
+    def _update_train_params(self):
+        """
+        Update train parameters.
+        """
+        ## -- Normal parameters
+        # The ratio of train dataset. The rest is test dataset.
+        self.train.train_ratio = 0.8
+        # Normal parameters related to seeg_he2023xuanwu dataset.
+        if self.train.dataset == "seeg_he2023xuanwu":
+            # Number of epochs used in training process
+            self.train.n_epochs = 300
+            # Number of warmup epochs
+            self.train.warmup_epochs = 20
+            # Number of batch size used in training process
+            self.train.batch_size = 32
+            # The learning rate factors of training process
+            self.train.lr_factors = (1e-5, 5e-4)
+        # Normal parameters related to eeg_zhou2023cibr dataset.
+        elif self.train.dataset == "eeg_zhou2023cibr":
+            # Number of epochs used in training process
+            self.train.n_epochs = 300
+            # Number of warmup epochs
+            self.train.warmup_epochs = 20
+            # Number of batch size used in training process
+            self.train.batch_size = 64
+            # The learning rate factors of training process
+            self.train.lr_factors = (1e-5, 5e-4)
+        # Normal parameters related to other dataset.
+        else:
+            # Number of epochs used in training process
+            self.train.n_epochs = 300
+            # Number of warmup epochs
+            self.train.warmup_epochs = 20
+            # Number of batch size used in training process
+            self.train.batch_size = 32
+            # The learning rate factors of training process
+            self.train.lr_factors = (1e-5, 5e-4)
+
 if __name__ == "__main__":
     # Instantiate `duin_params`.
     duin_params_inst = duin_params(dataset="seeg_he2023xuanwu")
