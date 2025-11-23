@@ -145,20 +145,25 @@ def augment_embeddings(visual_emb, semantic_emb, labels, n_augment, noise_type, 
 class EmbeddingDataset(Dataset):
     """Dataset for concatenated visual + semantic embeddings."""
 
-    def __init__(self, visual_emb, semantic_emb, labels):
+    def __init__(self, visual_emb, semantic_emb, labels, return_separate=False):
         self.visual_emb = torch.FloatTensor(visual_emb)
         self.semantic_emb = torch.FloatTensor(semantic_emb)
         self.labels = torch.LongTensor(labels)
+        self.return_separate = return_separate
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        # Concatenate visual and semantic embeddings
-        features = torch.cat([self.visual_emb[idx], self.semantic_emb[idx]], dim=0)
-        # Normalize the concatenated embedding to unit L2 norm
-        features = features / torch.norm(features, p=2)
-        return features, self.labels[idx]
+        if self.return_separate:
+            # Return separate embeddings for cosine similarity evaluation
+            return self.visual_emb[idx], self.semantic_emb[idx], self.labels[idx]
+        else:
+            # Concatenate visual and semantic embeddings
+            features = torch.cat([self.visual_emb[idx], self.semantic_emb[idx]], dim=0)
+            # Normalize the concatenated embedding to unit L2 norm
+            features = features / torch.norm(features, p=2)
+            return features, self.labels[idx]
 
 
 class MLPClassifier(nn.Module):
@@ -241,6 +246,75 @@ def evaluate(model, dataloader, criterion, device):
     return avg_loss, accuracy, all_preds, all_labels
 
 
+def evaluate_cosine_similarity(gt_visual_emb, gt_semantic_emb, dataloader, device):
+    """Evaluate using cosine similarity to GT class embeddings.
+
+    Args:
+        gt_visual_emb: (n_classes, d_visual) GT visual embeddings for each class
+        gt_semantic_emb: (n_classes, d_semantic) GT semantic embeddings for each class
+        dataloader: DataLoader with return_separate=True
+        device: torch device
+
+    Returns:
+        visual_acc: Accuracy using visual embeddings only
+        semantic_acc: Accuracy using semantic embeddings only
+        concat_acc: Accuracy using concatenated embeddings
+    """
+    # Convert GT embeddings to torch tensors and move to device
+    gt_visual = torch.FloatTensor(gt_visual_emb).to(device)  # (n_classes, d_visual)
+    gt_semantic = torch.FloatTensor(gt_semantic_emb).to(device)  # (n_classes, d_semantic)
+
+    # Normalize GT embeddings (they should already be normalized, but ensure it)
+    gt_visual = gt_visual / torch.norm(gt_visual, dim=1, keepdim=True)
+    gt_semantic = gt_semantic / torch.norm(gt_semantic, dim=1, keepdim=True)
+
+    # Concatenate GT embeddings for concat similarity
+    gt_concat = torch.cat([gt_visual, gt_semantic], dim=1)  # (n_classes, d_visual + d_semantic)
+    gt_concat = gt_concat / torch.norm(gt_concat, dim=1, keepdim=True)
+
+    visual_preds = []
+    semantic_preds = []
+    concat_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for visual_emb, semantic_emb, labels in dataloader:
+            visual_emb = visual_emb.to(device)  # (batch, d_visual)
+            semantic_emb = semantic_emb.to(device)  # (batch, d_semantic)
+            labels = labels.to(device)
+
+            # Normalize sample embeddings
+            visual_emb = visual_emb / torch.norm(visual_emb, dim=1, keepdim=True)
+            semantic_emb = semantic_emb / torch.norm(semantic_emb, dim=1, keepdim=True)
+
+            # Compute visual-only cosine similarity
+            # (batch, d_visual) @ (d_visual, n_classes) -> (batch, n_classes)
+            visual_sim = torch.matmul(visual_emb, gt_visual.T)
+            visual_pred = visual_sim.argmax(dim=1).cpu().numpy()
+            visual_preds.extend(visual_pred)
+
+            # Compute semantic-only cosine similarity
+            semantic_sim = torch.matmul(semantic_emb, gt_semantic.T)
+            semantic_pred = semantic_sim.argmax(dim=1).cpu().numpy()
+            semantic_preds.extend(semantic_pred)
+
+            # Compute concatenated cosine similarity
+            concat_emb = torch.cat([visual_emb, semantic_emb], dim=1)
+            concat_emb = concat_emb / torch.norm(concat_emb, dim=1, keepdim=True)
+            concat_sim = torch.matmul(concat_emb, gt_concat.T)
+            concat_pred = concat_sim.argmax(dim=1).cpu().numpy()
+            concat_preds.extend(concat_pred)
+
+            all_labels.extend(labels.cpu().numpy())
+
+    # Compute accuracies
+    visual_acc = accuracy_score(all_labels, visual_preds)
+    semantic_acc = accuracy_score(all_labels, semantic_preds)
+    concat_acc = accuracy_score(all_labels, concat_preds)
+
+    return visual_acc, semantic_acc, concat_acc
+
+
 def main(args):
     # Set random seed
     set_seed(args.seed)
@@ -303,9 +377,17 @@ def main(args):
     val_dataset = EmbeddingDataset(aug_visual[val_idx], aug_semantic[val_idx], aug_labels[val_idx])
     test_dataset = EmbeddingDataset(aug_visual[test_idx], aug_semantic[test_idx], aug_labels[test_idx])
 
+    # Create separate datasets for cosine similarity evaluation
+    val_dataset_cossim = EmbeddingDataset(aug_visual[val_idx], aug_semantic[val_idx], aug_labels[val_idx], return_separate=True)
+    test_dataset_cossim = EmbeddingDataset(aug_visual[test_idx], aug_semantic[test_idx], aug_labels[test_idx], return_separate=True)
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+
+    # Dataloaders for cosine similarity evaluation
+    val_loader_cossim = DataLoader(val_dataset_cossim, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    test_loader_cossim = DataLoader(test_dataset_cossim, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
     # Initialize model
     print("\n=== Initializing Model ===")
@@ -338,21 +420,34 @@ def main(args):
     print("\n=== Training ===")
     best_val_acc = 0.0
     best_model_state = None
-    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+    history = {
+        'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': [],
+        'val_cossim_visual_acc': [], 'val_cossim_semantic_acc': [], 'val_cossim_concat_acc': []
+    }
 
     for epoch in range(args.epochs):
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, _, _ = evaluate(model, val_loader, criterion, device)
+
+        # Evaluate using cosine similarity
+        val_visual_acc, val_semantic_acc, val_concat_acc = evaluate_cosine_similarity(
+            visual_emb, semantic_emb, val_loader_cossim, device
+        )
+
         scheduler.step()
 
         history['train_loss'].append(train_loss)
         history['train_acc'].append(train_acc)
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
+        history['val_cossim_visual_acc'].append(val_visual_acc)
+        history['val_cossim_semantic_acc'].append(val_semantic_acc)
+        history['val_cossim_concat_acc'].append(val_concat_acc)
 
         print(f"Epoch [{epoch+1}/{args.epochs}] "
               f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        print(f"  CosSim Acc - Visual: {val_visual_acc:.4f}, Semantic: {val_semantic_acc:.4f}, Concat: {val_concat_acc:.4f}")
 
         # Track best model (not saved to disk)
         if val_acc > best_val_acc:
@@ -366,9 +461,18 @@ def main(args):
     model.load_state_dict(best_model_state)
     test_loss, test_acc, test_preds, test_labels = evaluate(model, test_loader, criterion, device)
 
+    # Evaluate test set using cosine similarity
+    test_visual_acc, test_semantic_acc, test_concat_acc = evaluate_cosine_similarity(
+        visual_emb, semantic_emb, test_loader_cossim, device
+    )
+
     print(f"Test Loss: {test_loss:.4f}")
     print(f"Test Accuracy: {test_acc:.4f}")
     print(f"Best Val Accuracy: {best_val_acc:.4f}")
+    print(f"\nCosine Similarity Accuracies (Test Set):")
+    print(f"  Visual-only: {test_visual_acc:.4f}")
+    print(f"  Semantic-only: {test_semantic_acc:.4f}")
+    print(f"  Concatenated: {test_concat_acc:.4f}")
 
     # Classification report
     print("\n=== Classification Report ===")
@@ -380,6 +484,10 @@ def main(args):
         f.write(f"Test Loss: {test_loss:.4f}\n")
         f.write(f"Test Accuracy: {test_acc:.4f}\n")
         f.write(f"Best Val Accuracy: {best_val_acc:.4f}\n\n")
+        f.write("Cosine Similarity Accuracies (Test Set):\n")
+        f.write(f"  Visual-only: {test_visual_acc:.4f}\n")
+        f.write(f"  Semantic-only: {test_semantic_acc:.4f}\n")
+        f.write(f"  Concatenated: {test_concat_acc:.4f}\n\n")
         f.write("Classification Report:\n")
         f.write(report)
 
