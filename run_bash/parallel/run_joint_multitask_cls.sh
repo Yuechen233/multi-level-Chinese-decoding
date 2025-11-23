@@ -24,9 +24,9 @@ LR_MIN=1e-5                   # Minimum learning rate (cosine annealing end)
 LR_MAX=2e-4                   # Maximum learning rate (after warmup)
 
 # Training schedule
-N_EPOCHS=300                  # Total number of training epochs
+N_EPOCHS=500                  # Total number of training epochs
 WARMUP_EPOCHS=20              # Number of warmup epochs (linear warmup)
-BATCH_SIZE=32                 # Batch size for training
+BATCH_SIZE=64                 # Batch size for training
 
 ################################################################################
 # Joint Multi-Task + E2E Classification Parameters
@@ -36,11 +36,11 @@ BATCH_SIZE=32                 # Batch size for training
 TASK_WEIGHT_SEMANTIC=1.0      # Weight for semantic alignment task
 TASK_WEIGHT_VISUAL=1.0        # Weight for visual alignment task
 TASK_WEIGHT_ACOUSTIC=1.0      # Weight for acoustic classification task
-TASK_WEIGHT_E2E=1.0           # Weight for end-to-end word classification task (NEW)
+TASK_WEIGHT_E2E=2.0           # Weight for end-to-end word classification task (NEW)
 
 # Multi-task learning strategy flags
-# USE_UNCERTAINTY_WEIGHTING=""  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
-USE_UNCERTAINTY_WEIGHTING="--use_uncertainty_weighting"  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
+USE_UNCERTAINTY_WEIGHTING=""  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
+# USE_UNCERTAINTY_WEIGHTING="--use_uncertainty_weighting"  # Set to "--use_uncertainty_weighting" to enable auto-balancing, default as ""
 ACOUSTIC_USE_CONTRA=""        # Set to "--acoustic_use_contra" to add contrastive loss to acoustic task, default as ""
 
 # Task-specific mapping matrices flag (NEW)
@@ -82,7 +82,8 @@ ACOUSTIC_D_HIDDEN="128"            # Hidden layer dimensions (comma-separated)
 ACOUSTIC_DROPOUT=0.5               # Dropout rate for acoustic heads
 
 # Fusion head architecture (NEW)
-FUSION_D_HIDDEN="512,256"          # Fusion MLP hidden dimensions (comma-separated)
+# FUSION_D_HIDDEN="512,256"          # Fusion MLP hidden dimensions (comma-separated)
+FUSION_D_HIDDEN=""          # Fusion MLP hidden dimensions (comma-separated)
 FUSION_DROPOUT=0.3                 # Dropout rate for fusion head
 
 ################################################################################
@@ -146,7 +147,7 @@ for SUBJ in "${ALL_SUBJS[@]}"; do
         --visual_dropout ${VISUAL_DROPOUT} \
         --acoustic_d_hidden ${ACOUSTIC_D_HIDDEN} \
         --acoustic_dropout ${ACOUSTIC_DROPOUT} \
-        --fusion_d_hidden ${FUSION_D_HIDDEN} \
+        --fusion_d_hidden "${FUSION_D_HIDDEN}" \
         --fusion_dropout ${FUSION_DROPOUT} \
         --attn_dropout ${ATTN_DROPOUT} \
         --ff_dropout ${FF_DROPOUT} \

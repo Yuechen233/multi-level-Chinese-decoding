@@ -1051,8 +1051,8 @@ def train():
             # Remove previous best checkpoint
             if best_ckpt_path is not None and os.path.exists(best_ckpt_path):
                 os.remove(best_ckpt_path)
-                msg = f"Removed previous best checkpoint: {best_ckpt_path}"
-                print(msg); paths.run.logger.summaries.info(msg)
+                # msg = f"Removed previous best checkpoint: {best_ckpt_path}"
+                # print(msg); paths.run.logger.summaries.info(msg)
 
             best_val_total_loss = current_val_total_loss
             best_val_semantic_loss = loss_validation.get("semantic", float('inf'))
@@ -1286,7 +1286,11 @@ if __name__ == "__main__":
             params_i.model.acoustic_cls.d_hidden = [int(d) for d in args.acoustic_d_hidden.split(",")]
             params_i.model.acoustic_cls.dropout = args.acoustic_dropout
             # Fusion head parameters (NEW)
-            params_i.model.fusion.d_hidden = [int(d) for d in args.fusion_d_hidden.split(",")]
+            # Handle empty fusion_d_hidden (direct linear layer with no hidden layers)
+            if args.fusion_d_hidden.strip():
+                params_i.model.fusion.d_hidden = [int(d) for d in args.fusion_d_hidden.split(",")]
+            else:
+                params_i.model.fusion.d_hidden = []  # Empty list = direct linear projection
             params_i.model.fusion.dropout = args.fusion_dropout
             # Encoder dropout
             params_i.model.encoder.attn_dropout = args.attn_dropout

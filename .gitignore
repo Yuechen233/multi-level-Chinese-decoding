@@ -10,3 +10,4 @@
 /evaluate/embeddings_alignment/semantic_eval_out
 /evaluate/embeddings_alignment/visual_eval_out
 /.hf_cache
+embddings_cls_pretrain/output/
