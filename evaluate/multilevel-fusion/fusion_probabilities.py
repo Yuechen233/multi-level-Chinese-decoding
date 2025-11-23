@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 # Paths configuration
-visual_path='evaluate/multilevel-fusion/sub01/visual_embeddings_epoch_300.npy'
-semantic_path='evaluate/multilevel-fusion/sub01/semantic_embeddings_epoch_300.npy'
+visual_path='evaluate/multilevel-fusion/sub11/visual_embeddings_epoch_300.npy'
+semantic_path='evaluate/multilevel-fusion/sub11/semantic_embeddings_epoch_300.npy'
 
 # GT embeddings paths
 GT_semantic_path = '/mnt/afs/250010218/multi-level-Chinese-decoding/GT_embeddings/Duin_Semantic_GT_bert.npz'
