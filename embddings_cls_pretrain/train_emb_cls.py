@@ -145,11 +145,12 @@ def augment_embeddings(visual_emb, semantic_emb, labels, n_augment, noise_type, 
 class EmbeddingDataset(Dataset):
     """Dataset for concatenated visual + semantic embeddings."""
 
-    def __init__(self, visual_emb, semantic_emb, labels, return_separate=False):
+    def __init__(self, visual_emb, semantic_emb, labels, return_separate=False, normalize=True):
         self.visual_emb = torch.FloatTensor(visual_emb)
         self.semantic_emb = torch.FloatTensor(semantic_emb)
         self.labels = torch.LongTensor(labels)
         self.return_separate = return_separate
+        self.normalize = normalize
 
     def __len__(self):
         return len(self.labels)
@@ -161,8 +162,9 @@ class EmbeddingDataset(Dataset):
         else:
             # Concatenate visual and semantic embeddings
             features = torch.cat([self.visual_emb[idx], self.semantic_emb[idx]], dim=0)
-            # Normalize the concatenated embedding to unit L2 norm
-            features = features / torch.norm(features, p=2)
+            # Normalize the concatenated embedding to unit L2 norm (optional)
+            if self.normalize:
+                features = features / torch.norm(features, p=2)
             return features, self.labels[idx]
 
 
@@ -190,6 +192,97 @@ class MLPClassifier(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+
+class CNN1DClassifier(nn.Module):
+    """1D CNN classifier for processing flattened embeddings as sequences."""
+
+    def __init__(self, input_dim, channels, kernels, output_dim, dropout=0.1):
+        super(CNN1DClassifier, self).__init__()
+        self.input_dim = input_dim
+
+        # Build convolutional layers
+        conv_layers = []
+        in_channels = 1  # Input reshaped to (batch, 1, input_dim)
+
+        for out_channels, kernel_size in zip(channels, kernels):
+            conv_layers.append(nn.Conv1d(in_channels, out_channels, kernel_size, padding=kernel_size//2))
+            conv_layers.append(nn.BatchNorm1d(out_channels))
+            conv_layers.append(nn.ReLU())
+            conv_layers.append(nn.Dropout(dropout))
+            in_channels = out_channels
+
+        self.conv_layers = nn.Sequential(*conv_layers)
+
+        # Global pooling and output layer
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Linear(channels[-1], output_dim)
+
+    def forward(self, x):
+        # Reshape from (batch, input_dim) to (batch, 1, input_dim)
+        x = x.unsqueeze(1)
+
+        # Apply convolutions
+        x = self.conv_layers(x)
+
+        # Global pooling: (batch, channels, length) -> (batch, channels, 1)
+        x = self.pool(x)
+
+        # Flatten: (batch, channels, 1) -> (batch, channels)
+        x = x.squeeze(-1)
+
+        # Final classification
+        x = self.fc(x)
+        return x
+
+
+class CNN2DClassifier(nn.Module):
+    """2D CNN classifier treating embeddings as pseudo-images."""
+
+    def __init__(self, input_dim, channels, kernels, output_dim, dropout=0.1):
+        super(CNN2DClassifier, self).__init__()
+        self.input_dim = input_dim
+
+        # Compute 2D reshape dimensions (1536 -> 1x32x48)
+        # We use height=32, width=48 as 32*48=1536
+        self.height = 32
+        self.width = 48
+        assert self.height * self.width == input_dim, f"Height*Width must equal input_dim: {self.height}*{self.width} != {input_dim}"
+
+        # Build convolutional layers
+        conv_layers = []
+        in_channels = 1  # Input reshaped to (batch, 1, height, width)
+
+        for out_channels, kernel_size in zip(channels, kernels):
+            conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size, padding=kernel_size//2))
+            conv_layers.append(nn.BatchNorm2d(out_channels))
+            conv_layers.append(nn.ReLU())
+            conv_layers.append(nn.Dropout(dropout))
+            in_channels = out_channels
+
+        self.conv_layers = nn.Sequential(*conv_layers)
+
+        # Global pooling and output layer
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(channels[-1], output_dim)
+
+    def forward(self, x):
+        # Reshape from (batch, input_dim) to (batch, 1, height, width)
+        batch_size = x.size(0)
+        x = x.view(batch_size, 1, self.height, self.width)
+
+        # Apply convolutions
+        x = self.conv_layers(x)
+
+        # Global pooling: (batch, channels, H, W) -> (batch, channels, 1, 1)
+        x = self.pool(x)
+
+        # Flatten: (batch, channels, 1, 1) -> (batch, channels)
+        x = x.view(batch_size, -1)
+
+        # Final classification
+        x = self.fc(x)
+        return x
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
@@ -373,9 +466,14 @@ def main(args):
     print(f"Test samples: {len(test_idx)}")
 
     # Create datasets and dataloaders
-    train_dataset = EmbeddingDataset(aug_visual[train_idx], aug_semantic[train_idx], aug_labels[train_idx])
-    val_dataset = EmbeddingDataset(aug_visual[val_idx], aug_semantic[val_idx], aug_labels[val_idx])
-    test_dataset = EmbeddingDataset(aug_visual[test_idx], aug_semantic[test_idx], aug_labels[test_idx])
+    # For CNN models, don't normalize the concatenated embeddings (they're already normalized individually)
+    # For MLP, keep the normalization
+    normalize_concat = (args.model_type == 'mlp')
+    print(f"Concatenated embedding normalization: {normalize_concat} (model_type={args.model_type})")
+
+    train_dataset = EmbeddingDataset(aug_visual[train_idx], aug_semantic[train_idx], aug_labels[train_idx], normalize=normalize_concat)
+    val_dataset = EmbeddingDataset(aug_visual[val_idx], aug_semantic[val_idx], aug_labels[val_idx], normalize=normalize_concat)
+    test_dataset = EmbeddingDataset(aug_visual[test_idx], aug_semantic[test_idx], aug_labels[test_idx], normalize=normalize_concat)
 
     # Create separate datasets for cosine similarity evaluation
     val_dataset_cossim = EmbeddingDataset(aug_visual[val_idx], aug_semantic[val_idx], aug_labels[val_idx], return_separate=True)
@@ -397,18 +495,61 @@ def main(args):
     input_dim = visual_emb.shape[1] + semantic_emb.shape[1]  # 768 + 768 = 1536
     output_dim = len(np.unique(labels))  # 61 classes
 
-    model = MLPClassifier(
-        input_dim=input_dim,
-        hidden_dims=args.mlp_hidden,
-        output_dim=output_dim,
-        dropout=args.dropout
-    ).to(device)
+    # Initialize model based on model_type
+    if args.model_type == 'mlp':
+        model = MLPClassifier(
+            input_dim=input_dim,
+            hidden_dims=args.mlp_hidden,
+            output_dim=output_dim,
+            dropout=args.dropout
+        ).to(device)
+        print(f"Model architecture: MLP")
+        print(f"  Input dim: {input_dim}")
+        print(f"  Hidden dims: {args.mlp_hidden}")
+        print(f"  Output dim: {output_dim}")
+        print(f"  Dropout: {args.dropout}")
 
-    print(f"Model architecture:")
-    print(f"  Input dim: {input_dim}")
-    print(f"  Hidden dims: {args.mlp_hidden}")
-    print(f"  Output dim: {output_dim}")
-    print(f"  Dropout: {args.dropout}")
+    elif args.model_type == 'cnn1d':
+        # Set default CNN1D architecture if not specified
+        cnn_channels = args.cnn_channels if args.cnn_channels else [64, 128, 256, 512]
+        cnn_kernels = args.cnn_kernels if args.cnn_kernels else [7, 5, 5, 3]
+
+        model = CNN1DClassifier(
+            input_dim=input_dim,
+            channels=cnn_channels,
+            kernels=cnn_kernels,
+            output_dim=output_dim,
+            dropout=args.cnn_dropout
+        ).to(device)
+        print(f"Model architecture: CNN1D")
+        print(f"  Input dim: {input_dim}")
+        print(f"  Conv channels: {cnn_channels}")
+        print(f"  Conv kernels: {cnn_kernels}")
+        print(f"  Output dim: {output_dim}")
+        print(f"  Dropout: {args.cnn_dropout}")
+
+    elif args.model_type == 'cnn2d':
+        # Set default CNN2D architecture if not specified
+        cnn_channels = args.cnn_channels if args.cnn_channels else [32, 64, 128, 256]
+        cnn_kernels = args.cnn_kernels if args.cnn_kernels else [3, 3, 3, 3]
+
+        model = CNN2DClassifier(
+            input_dim=input_dim,
+            channels=cnn_channels,
+            kernels=cnn_kernels,
+            output_dim=output_dim,
+            dropout=args.cnn_dropout
+        ).to(device)
+        print(f"Model architecture: CNN2D")
+        print(f"  Input dim: {input_dim} (reshaped to 1x32x48)")
+        print(f"  Conv channels: {cnn_channels}")
+        print(f"  Conv kernels: {cnn_kernels}")
+        print(f"  Output dim: {output_dim}")
+        print(f"  Dropout: {args.cnn_dropout}")
+
+    else:
+        raise ValueError(f"Unknown model_type: {args.model_type}")
+
     print(f"  Total parameters: {sum(p.numel() for p in model.parameters())}")
 
     # Loss and optimizer
@@ -532,10 +673,19 @@ if __name__ == '__main__':
                         help='Number of augmented samples per original embedding')
 
     # Model architecture
+    parser.add_argument('--model_type', type=str, default='mlp',
+                        choices=['mlp', 'cnn1d', 'cnn2d'],
+                        help='Type of classifier model')
     parser.add_argument('--mlp_hidden', type=int, nargs='*', default=[1024, 512, 256],
                         help='Hidden layer sizes for MLP (space-separated). Empty for linear classifier.')
     parser.add_argument('--dropout', type=float, default=0.1,
-                        help='Dropout rate')
+                        help='Dropout rate for MLP')
+    parser.add_argument('--cnn_channels', type=int, nargs='*', default=None,
+                        help='Output channels for each CNN layer. Default: [64,128,256,512] for CNN1D, [32,64,128,256] for CNN2D')
+    parser.add_argument('--cnn_kernels', type=int, nargs='*', default=None,
+                        help='Kernel sizes for each CNN layer. Default: [7,5,5,3] for CNN1D, [3,3,3,3] for CNN2D')
+    parser.add_argument('--cnn_dropout', type=float, default=0.1,
+                        help='Dropout rate for CNN models')
 
     # Training parameters
     parser.add_argument('--batch_size', type=int, default=64,
